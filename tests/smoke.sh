@@ -53,8 +53,9 @@ docker exec "$server" bash -c '
      route:{final:\"proxy\"}}" /opt/sing-box/config.json > /tmp/client.json
   sing-box check -c /tmp/client.json'
 docker exec -d "$server" sing-box run -c /tmp/client.json
+http_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http")
 docker exec "$server" curl --retry 10 --retry-connrefused --retry-delay 1 \
-  --max-time 20 --noproxy '' --proxy socks5h://127.0.0.1:19080 "http://$http:8080/" | grep -q singdock-smoke-ok
+  --max-time 20 --noproxy '' --proxy socks5h://127.0.0.1:19080 "http://$http_ip:8080/" | grep -q singdock-smoke-ok
 docker exec "$server" singdock rotate-ports
 docker exec "$server" singdock check
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
