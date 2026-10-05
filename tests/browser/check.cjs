@@ -82,6 +82,9 @@ async function main() {
       await page.waitForFunction(() => document.getElementById('share-notice').textContent.includes('已复制'));
       await page.keyboard.press('Escape');
       await page.locator('#share[open]').waitFor({state:'hidden'});
+      // Native dialog close events are queued after the open attribute changes.
+      // Wait for the cleanup side effect rather than racing its event handler.
+      await page.waitForFunction(() => document.getElementById('share-text').value === '');
       assert.equal(await page.locator('#share-text').inputValue(), '');
       assert.deepEqual(errors, [], 'Unexpected browser JS errors');
       console.log(`PASS: ${name} layout, batches, preview/cancel/apply, stale preview, links and clipboard`);
