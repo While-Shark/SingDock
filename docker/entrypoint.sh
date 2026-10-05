@@ -3,6 +3,14 @@ set -Eeuo pipefail
 umask 077
 if [[ "${1:-serve}" != serve ]]; then exec singdock "$@"; fi
 [[ "${ENABLE_WARP:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_WARP must be true or false"; exit 1; }
+[[ "${ENABLE_GUI:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_GUI must be true or false"; exit 1; }
+if [[ "${ENABLE_GUI:-false}" == true ]]; then
+  gui_password="${GUI_PASSWORD:-}"
+  [[ ${#gui_password} -ge 16 && "$gui_password" != *:* ]] || { echo "Set GUI_PASSWORD (16+ characters, no colon)"; exit 1; }
+  gui_port="${GUI_PORT:-18100}"
+  [[ "$gui_port" =~ ^[1-9][0-9]{3,4}$ ]] && (( gui_port >= 1024 && gui_port <= 65535 )) || { echo "Invalid GUI_PORT"; exit 1; }
+  [[ "${GUI_PORT:-18100}" != 40000 ]] || { echo "GUI_PORT conflicts with WARP"; exit 1; }
+fi
 mkdir -p /opt/sing-box /run/singdock /var/lib/cloudflare-warp
 supervisor_pid=''
 cleanup() {
@@ -47,7 +55,11 @@ if [[ "${ENABLE_WARP:-false}" == true ]]; then
   [[ "$ready" == true ]] || { echo "WARP egress check failed; no direct fallback"; exit 1; }
 fi
 singdock init
+if [[ "${ENABLE_GUI:-false}" == true ]]; then
+  python3 -c 'import json,os; c=json.load(open("/opt/sing-box/config.json")); assert all(n["listen_port"] != int(os.environ.get("GUI_PORT", "18100")) for n in c["inbounds"]), "GUI port conflicts with a node"'
+fi
 ctl start sing-box
+if [[ "${ENABLE_GUI:-false}" == true ]]; then ctl start gui; fi
 # Startup failure must fail the container instead of looking healthy.
 ctl status sing-box | grep -q RUNNING
 echo "SingDock ready. Run: docker exec -it singdock singdock menu"

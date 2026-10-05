@@ -9,6 +9,10 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
+      ENABLE_GUI: "${ENABLE_GUI:-false}"
+      GUI_BIND: "${GUI_BIND:-127.0.0.1}"
+      GUI_PORT: "${GUI_PORT:-18100}"
+      GUI_PASSWORD: "${GUI_PASSWORD:-}"
       ENABLE_WARP: "${ENABLE_WARP:-false}"
       WARP_ACCEPT_TOS: "${WARP_ACCEPT_TOS:-false}"
       PUBLIC_HOST: "${PUBLIC_HOST:-}"

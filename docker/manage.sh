@@ -53,7 +53,7 @@ save_all_ports() {
     if [[ -z "${!var}" ]]; then
       while :; do
         port=$((10000 + RANDOM % 50000))
-        [[ "$port" != "$WARP_SOCKS_PORT" && " ${PORTS[*]} " != *" $port "* ]] || continue
+        [[ "$port" != "$WARP_SOCKS_PORT" && "$port" != "${GUI_PORT:-18100}" && " ${PORTS[*]} " != *" $port "* ]] || continue
         ss -H -lntu | awk '{print $5}' | grep -Eq ":$port$" && continue
         printf -v "$var" '%s' "$port"
         PORTS+=("$port")
