@@ -1,0 +1,44 @@
+name: GUI Browser
+on:
+  push:
+    paths: ['web/**', 'tests/browser/**', '.github/workflows/gui-browser.yml']
+  pull_request:
+    paths: ['web/**', 'tests/browser/**', '.github/workflows/gui-browser.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned browser test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/singdock-browser" --no-save --package-lock=false playwright@1.62.1
+          "$RUNNER_TEMP/singdock-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Verify desktop and mobile GUI interactions
+        env:
+          NODE_PATH: ${{ runner.temp }}/singdock-browser/node_modules
+        run: |
+          python3 tests/browser/fixture.py > "$RUNNER_TEMP/singdock-fixture.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null --fail --user admin:synthetic-browser-password http://127.0.0.1:18101/api/nodes; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then cat "$RUNNER_TEMP/singdock-fixture.log"; exit 1; fi
+          node tests/browser/check.cjs
+      - name: Upload desktop and mobile screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-browser-screenshots
+          path: browser-results/*.png
+          retention-days: 7
+          if-no-files-found: ignore
