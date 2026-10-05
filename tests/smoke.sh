@@ -26,6 +26,7 @@ start() {
   [[ "$mode" != host ]] || server_network=host
   docker run -d --name "$server" --network "$server_network" \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
+    -e REALITY_SERVER=localhost -e REALITY_SERVERS=localhost \
     -v "$volume:/opt/sing-box" "$image" >/dev/null
   for _ in {1..60}; do
     if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$server")" == healthy ]]; then return; fi
@@ -63,11 +64,36 @@ docker exec "$server" singdock links > /tmp/singdock-links-"$suffix"
 test "$(grep -Ec '^  (vless|trojan|hy2|vmess|ss|tuic|anytls)://' /tmp/singdock-links-"$suffix")" -ge 10
 ! grep -q -- '-warp' /tmp/singdock-links-"$suffix"
 rm /tmp/singdock-links-"$suffix"
+# Local TLS 1.3 / H2 target for authenticated Reality handshakes.
+# Only the test fixture binds loopback 443; deployment ports remain random.
+docker exec -d "$server" sh -c 'exec openssl s_server -accept 127.0.0.1:443 \
+  -cert /opt/sing-box/cert/fullchain.pem -key /opt/sing-box/cert/key.pem \
+  -tls1_3 -alpn h2 -www > /tmp/reality-target.log 2>&1'
+target_ready=false
+for _ in {1..10}; do
+  if docker exec "$server" timeout 5 openssl s_client -connect 127.0.0.1:443 \
+      -servername localhost -tls1_3 -alpn h2 -verify_return_error \
+      -CAfile /opt/sing-box/cert/fullchain.pem </dev/null >/dev/null 2>&1; then
+    target_ready=true; break
+  fi
+  sleep 1
+done
+if [[ "$target_ready" != true ]]; then
+  docker exec "$server" cat /tmp/reality-target.log >&2 || true
+  exit 1
+fi
+# Keep SNI localhost, dial its local fixture directly rather than public DNS.
+docker exec "$server" sh -c '
+  jq "(.inbounds[] | select(.tls.reality.enabled == true) | .tls.reality.handshake.server) = \"127.0.0.1\"" \
+    /opt/sing-box/config.json > /tmp/reality-config.json
+  chmod 600 /tmp/reality-config.json
+  mv /tmp/reality-config.json /opt/sing-box/config.json'
+docker exec "$server" singdock restart
 # Actual protocol handshakes -> isolated HTTP server, no public probe.
 # Hysteria2 and TUIC use UDP to the node; the target request remains TCP.
 docker cp "$(dirname "$0")/client_config.py" "$server:/tmp/client_config.py"
 http_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http")
-for protocol in ss ss2022 vmess-ws hy2 hy2-obfs tuic-v5 anytls; do
+for protocol in ss ss2022 vmess-ws hy2 hy2-obfs tuic-v5 anytls vless-reality vless-grpcr trojan-reality; do
   client="/tmp/client-$protocol.json"
   port=$(docker exec "$server" python3 /tmp/client_config.py /opt/sing-box/config.json "$protocol" "$client")
   docker exec "$server" sing-box check -c "$client"
@@ -83,4 +109,4 @@ done
 docker exec "$server" singdock rotate-ports
 docker exec "$server" singdock check
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
-echo "PASS ($mode): config, rejected candidate, identity persistence, shutdown, links, seven protocol handshakes, port rotation"
+echo "PASS ($mode): config, rejected candidate, identity persistence, shutdown, links, ten protocol handshakes, port rotation"

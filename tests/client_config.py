@@ -8,7 +8,7 @@ import ssl
 import sys
 
 
-def client_config(config, tag):
+def client_config(config, tag, credentials=None):
     inbound = next(item for item in config["inbounds"] if item["tag"] == tag)
     outbound = {
         "type": inbound["type"],
@@ -22,6 +22,26 @@ def client_config(config, tag):
     elif kind == "vmess":
         outbound.update(uuid=inbound["users"][0]["uuid"], security="auto")
         outbound["transport"] = inbound["transport"]
+    elif kind in ("vless", "trojan"):
+        user = inbound["users"][0]
+        if kind == "vless":
+            outbound["uuid"] = user["uuid"]
+            if "flow" in user:
+                outbound["flow"] = user["flow"]
+        else:
+            outbound["password"] = user["password"]
+        if "transport" in inbound:
+            outbound["transport"] = inbound["transport"]
+        outbound["tls"] = {
+            "enabled": True,
+            "server_name": inbound["tls"]["server_name"],
+            "utls": {"enabled": True, "fingerprint": "chrome"},
+            "reality": {
+                "enabled": True,
+                "public_key": credentials["REALITY_PUB"],
+                "short_id": inbound["tls"]["reality"]["short_id"][0],
+            },
+        }
     elif kind in ("hysteria2", "tuic", "anytls"):
         outbound["password"] = inbound["users"][0]["password"]
         if kind == "tuic":
@@ -69,7 +89,12 @@ def client_config(config, tag):
 
 def main():
     source, tag, destination = sys.argv[1:]
-    config, port = client_config(json.loads(Path(source).read_text()), tag)
+    credentials = dict(
+        line.split("=", 1)
+        for line in (Path(source).parent / "creds.env").read_text().splitlines()
+        if "=" in line
+    )
+    config, port = client_config(json.loads(Path(source).read_text()), tag, credentials)
     # Test files contain real node credentials; never print their contents.
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as output:

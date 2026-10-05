@@ -4,7 +4,7 @@
 
 **当前为首版测试实现。** 普通镜像与可选 WARP 镜像已通过 AMD64、ARM64 构建；普通容器已通过启动、配置校验、身份持久化、端口更换及真实 Shadowsocks TCP 握手测试。目标是解决用户空间依赖，不保证旧宿主内核能运行所有协议或官方 WARP；其余协议握手和 CentOS 7/WARP 需实测后确认。
 
-AMD64、ARM64 的 bridge/host 两种网络、错误配置保护、Shadowsocks TCP 链路及 WARP 二进制运行检查均已通过。CI 现已进一步加入 Shadowsocks 2022、VMess WS、Hysteria2（含混淆）、TUIC、AnyTLS 的真实握手检查，新增协议结果以 [Actions](https://github.com/While-Shark/SingDock/actions) 为准。二进制版本检查不代表 WARP 注册、连接或出口验证通过。
+AMD64、ARM64 的 bridge/host 两种网络、错误配置保护，以及 Shadowsocks、Shadowsocks 2022、VMess WS、Hysteria2（含混淆）、TUIC、AnyTLS 七种节点的真实链路均已通过。WARP 镜像构建和二进制运行检查也已通过，但不代表注册、连接或出口验证通过。CI 现已加入三种 Reality 节点的本地 TLS 握手测试，新增结果以 [Actions](https://github.com/While-Shark/SingDock/actions) 为准。
 
 ## Docker Compose
 
@@ -107,6 +107,6 @@ bash tests/smoke.sh singdock:test bridge
 bash tests/smoke.sh singdock:test host
 ```
 
-CI 分别覆盖隔离 bridge 网络与部署使用的 host 网络，测试配置、错误配置不覆盖旧文件、密钥/证书/端口保留、停止、分享链接、端口更换，以及七种协议的客户端 → 代理 → HTTP 链路。TLS 测试显式信任生成的证书，保持证书校验开启。Hysteria2/TUIC 的检查覆盖 UDP 入站传输到 TCP 目标，不代表 UDP 目标或 WARP 出站可用。三种 Reality 节点仍待单独握手验证。
+CI 分别覆盖隔离 bridge 网络与部署使用的 host 网络，测试配置、错误配置不覆盖旧文件、密钥/证书/端口保留、停止、分享链接、端口更换，以及十种节点的客户端 → 代理 → HTTP 链路。TLS 测试显式信任生成的证书，保持证书校验开启。Reality 使用本地 TLS 1.3/H2 目标，客户端配置真实公钥、short ID、uTLS 和对应传输；不依赖公网 SNI 网站。Hysteria2/TUIC 的检查覆盖 UDP 入站传输到 TCP 目标，不代表 UDP 目标或 WARP 出站可用。
 
-host 测试会临时监听测试机器端口，应在测试机器运行；脚本退出时清理自己的容器和测试数据。不据此声称全部协议或 WARP 已可用。
+host 测试会临时监听测试机器端口，包括仅供本地 Reality 目标使用的 127.0.0.1:443，应在测试机器运行；脚本退出时清理自己的容器和测试数据。正常部署不会启动该 TLS 测试目标。测试结果不代表所有客户端或 WARP 均兼容。

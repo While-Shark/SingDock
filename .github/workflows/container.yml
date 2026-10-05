@@ -38,7 +38,7 @@ jobs:
         run: |
           test "$(docker image inspect -f '{{.Architecture}}' singdock:test)" = "$EXPECTED_ARCH"
           docker run --rm --entrypoint /usr/local/bin/sing-box singdock:test version
-      - name: Deployment and seven real protocol handshakes
+      - name: Deployment and ten real protocol handshakes
         run: bash tests/smoke.sh singdock:test ${{ matrix.network }}
   warp-build:
     name: warp-build (${{ matrix.platform.arch }})
