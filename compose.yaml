@@ -8,6 +8,12 @@ services:
     container_name: singdock
     network_mode: host
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - MKNOD
+      - SYS_CHROOT
     environment:
       ENABLE_GUI: "${ENABLE_GUI:-false}"
       GUI_BIND: "${GUI_BIND:-127.0.0.1}"

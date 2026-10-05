@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 from ports import PortManager, plan, revision
 from server import Handler
+from http_security import BoundedHTTPServer
 from settings import Settings
 
 CONFIG = {'inbounds': [
@@ -117,7 +118,7 @@ class PortsTest(Fixture):
 class HttpTest(Fixture):
     def setUp(self):
         super().setUp()
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server = BoundedHTTPServer(('127.0.0.1', 0), Handler)
         self.server.manager = self.manager
         self.server.username = 'admin'
         self.server.gui_path = ''

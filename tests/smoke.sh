@@ -25,6 +25,7 @@ start() {
   local server_network="$net"
   [[ "$mode" != host ]] || server_network=host
   docker run -d --name "$server" --network "$server_network" \
+    --security-opt no-new-privileges:true --cap-drop NET_RAW --cap-drop MKNOD --cap-drop SYS_CHROOT \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
     -e ENABLE_GUI=true -e GUI_USERNAME=smoke-manager -e GUI_PATH=/private/control \
     -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \

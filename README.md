@@ -60,6 +60,7 @@ GUI_PATH=/private/control
 ```
 
 ```bash
+chmod 600 .env
 docker compose up -d --build
 docker compose exec singdock singdock ports
 ```
@@ -108,6 +109,7 @@ ssh -L 18100:127.0.0.1:18100 root@你的VPS地址
 先备份，再更新代码并重建：
 
 ```bash
+umask 077
 docker compose stop
 tar -czf singdock-backup.tar.gz .env data
 docker compose start
@@ -157,6 +159,7 @@ AMD64/ARM64 的 WARP 镜像构建及二进制检查已通过；注册、连接�
 
 - [Container CI](https://github.com/While-Shark/SingDock/actions/workflows/container.yml)：AMD64/ARM64、bridge/host，检查启动、凭据持久化、GUI 登录、预览、真实服务重启和 10 种节点的客户端 → 代理 → HTTP 链路。Reality 使用隔离的本地 TLS 1.3/H2 目标。
 - [GUI Browser CI](https://github.com/While-Shark/SingDock/actions/workflows/gui-browser.yml)：1280px 桌面和 390px 手机，覆盖批量配置、取消/应用预览、过期配置错误、链接复制和关闭清理；增加默认路径/账号与自定义路径/账号两组测试。合成节点截图保存在 `gui-browser-screenshots-*` 产物中，保留 7 天。
+- 持久化节点设置通过白名单数据解析，不执行 `source`；可写数据目录不进入执行 PATH。GUI 对登录失败限流，限制同时处理的连接数，拒绝冲突长度及分块请求。反代下限流按实际连接地址计数，不信任可伪造的转发头。
 - GUI 列表不返回密码、私钥或 UUID；分享链接含客户端凭据，按需读取。界面不需要 Docker socket，包含登录校验、跨站写入拦截、文件锁、过期预览检测和静态文件白名单。
 - 配置及回滚备份使用 600 权限。端口/配置分别原子替换；强制终止容器可能需要用 `.bak` 恢复。探测与重启间的端口抢占会由失败回滚处理。
 - 查看 `docker compose logs --tail=200` 和 `singdock status`；配置问题执行 `singdock check`。
@@ -167,3 +170,5 @@ AMD64/ARM64 的 WARP 镜像构建及二进制检查已通过；注册、连接�
 上游信息与适配方式见 [UPSTREAM.md](UPSTREAM.md)。不在每次启动时下载执行远程脚本，不自动同步上游；升级前可记录 `git rev-parse HEAD` 以便回退。
 
 </details>
+
+安全扫描范围、修复和剩余边界见 [SECURITY.md](SECURITY.md)。

@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web'))
 from ports import PortManager, PORT_KEYS, TAGS
 from server import Handler
+from http_security import BoundedHTTPServer
 
 
 class FixtureHandler(Handler):
@@ -29,7 +30,7 @@ def main():
                                for i, (tag, kind) in enumerate(zip(TAGS, types))]}
         (root / 'config.json').write_text(json.dumps(config))
         (root / 'ports.env').write_text(''.join(f'{key}={30000 + i}\n' for i, key in enumerate(PORT_KEYS.values())))
-        server = ThreadingHTTPServer(('127.0.0.1', 18101), FixtureHandler)
+        server = BoundedHTTPServer(('127.0.0.1', 18101), FixtureHandler)
         server.username = os.environ.get('GUI_USERNAME', 'admin')
         server.gui_path = os.environ.get('GUI_PATH', '/').rstrip('/')
         server.password = 'synthetic-browser-password'

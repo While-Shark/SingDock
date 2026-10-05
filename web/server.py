@@ -1,13 +1,14 @@
 """Small authenticated management surface; no Docker socket or shell input."""
 import base64
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import subprocess
 from urllib.parse import urlsplit
 from ports import PortManager
 from settings import Settings
+from http_security import BoundedHTTPServer
 
 ROOT = Path(__file__).parent
 
@@ -25,6 +26,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if status == 429:
+            self.send_header('Retry-After', '60')
         if status == 401:
             self.send_header('WWW-Authenticate', 'Basic realm="SingDock", charset="UTF-8"')
         self.end_headers()
@@ -33,6 +36,13 @@ class Handler(BaseHTTPRequestHandler):
     def authorized(self):
         token = base64.b64encode((self.server.username + ':' + self.server.password).encode()).decode()
         return hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Basic ' + token).encode())
+
+    def require_auth(self):
+        status = self.server.login_limiter.authenticate(self.client_address[0], self.authorized())
+        if status != 200:
+            self.send(status, {'error': '登录失败过多，请稍后再试' if status == 429 else '请使用配置的管理用户名和密码登录'})
+            return False
+        return True
 
     def route(self):
         """Match the configured prefix exactly, before issuing an auth challenge."""
@@ -59,8 +69,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             return
-        if not self.authorized():
-            return self.send(401, {'error': '请使用配置的管理用户名和密码登录'})
+        if not self.require_auth():
+            return
         try:
             if path == '/api/nodes':
                 return self.send(200, self.server.manager.snapshot())
@@ -83,16 +93,21 @@ class Handler(BaseHTTPRequestHandler):
         path = self.route()
         if path not in ('/api/preview', '/api/apply'):
             return self.send(404, {'error': '接口不存在'})
-        if not self.authorized():
-            return self.send(401, {'error': '请先登录'})
+        if not self.require_auth():
+            return
         # Custom header forces cross-site requests through a preflight we do not allow.
         if self.headers.get('X-SingDock-Request') != '1' or self.headers.get('Content-Type') != 'application/json':
             return self.send(403, {'error': '请求来源校验失败'})
+        if self.headers.get('Transfer-Encoding') is not None or len(self.headers.get_all('Content-Length', [])) != 1:
+            return self.send(400, {'error': '请求长度格式无效'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 < length <= 16384:
                 raise ValueError('请求大小无效')
-            body = json.loads(self.rfile.read(length))
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                raise ValueError('请求未完整发送')
+            body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError('请求格式无效')
             result = self.server.manager.change(body.get('ports'), body.get('revision'), path == '/api/apply')
@@ -116,7 +131,7 @@ def main():
         settings = Settings.from_env()
     except ValueError as error:
         raise SystemExit(str(error))
-    server = ThreadingHTTPServer((settings.bind, settings.port), Handler)
+    server = BoundedHTTPServer((settings.bind, settings.port), Handler)
     server.username = settings.username
     server.password = settings.password
     server.gui_path = settings.path

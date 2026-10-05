@@ -8,6 +8,7 @@ if [[ "${ENABLE_GUI:-false}" == true ]]; then
   python3 /opt/singdock/web/settings.py
 fi
 mkdir -p /opt/sing-box /run/singdock /var/lib/cloudflare-warp
+chmod 700 /opt/sing-box /run/singdock /var/lib/cloudflare-warp
 supervisor_pid=''
 cleanup() {
   if [[ -n "$supervisor_pid" ]]; then
