@@ -1,6 +1,5 @@
 """Bound worker count and authentication failures without trusting proxy headers."""
 from collections import deque
-from http.server import ThreadingHTTPServer
 import threading
 import time
 
@@ -36,31 +35,3 @@ class LoginLimiter:
             bucket.append(now)
             self.total.append(now)
             return 401
-
-
-class BoundedHTTPServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def __init__(self, *args, max_workers=16, **kwargs):
-        self.slots = threading.BoundedSemaphore(max_workers)
-        self.login_limiter = LoginLimiter()
-        super().__init__(*args, **kwargs)
-
-    def process_request(self, request, client_address):
-        if not self.slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        try:
-            super().process_request(request, client_address)
-        except Exception:
-            self.slots.release()
-            raise
-
-    def process_request_thread(self, request, client_address):
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self.slots.release()
-
-    def handle_error(self, request, client_address):
-        pass  # Do not dump request context or auth headers into container logs.

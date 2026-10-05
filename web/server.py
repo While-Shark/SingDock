@@ -1,129 +1,136 @@
-"""Small authenticated management surface; no Docker socket or shell input."""
+"""Authenticated Flask management API, served by Waitress without debug mode."""
 import base64
 import hmac
-from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import subprocess
 from urllib.parse import urlsplit
+
+from flask import Flask, Response, request, redirect
+from werkzeug.exceptions import HTTPException
+from waitress import create_server
 from ports import PortManager
 from settings import Settings
-from http_security import BoundedHTTPServer
+from http_security import LoginLimiter
 
 ROOT = Path(__file__).parent
+MAX_BODY = 16384
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *_):
-        pass  # Never log credentials, bodies, or share links.
+def create_app(settings=None, manager=None, links_provider=None):
+    settings = settings or Settings.from_env()
+    manager = manager or PortManager('/opt/sing-box', (settings.port, 40000))
+    app = Flask(__name__, static_folder=None)
+    app.config.update(MAX_CONTENT_LENGTH=MAX_BODY, DEBUG=False)
+    app.json.ensure_ascii = False
+    limiter = LoginLimiter()
+    expected = b'Basic ' + base64.b64encode((settings.username + ':' + settings.password).encode())
 
-    def send(self, status, data, kind='application/json; charset=utf-8'):
-        raw = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, dict) else data
-        self.send_response(status)
-        self.send_header('Content-Type', kind)
-        self.send_header('Content-Length', str(len(raw)))
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('X-Frame-Options', 'DENY')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-        if status == 429:
-            self.send_header('Retry-After', '60')
-        if status == 401:
-            self.send_header('WWW-Authenticate', 'Basic realm="SingDock", charset="UTF-8"')
-        self.end_headers()
-        self.wfile.write(raw)
+    def reply(status, data):
+        return app.json.response(data), status
 
-    def authorized(self):
-        token = base64.b64encode((self.server.username + ':' + self.server.password).encode()).decode()
-        return hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Basic ' + token).encode())
+    @app.after_request
+    def secure_headers(response):
+        response.headers.update({
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
+        if response.status_code == 401:
+            response.headers['WWW-Authenticate'] = 'Basic realm="SingDock", charset="UTF-8"'
+        if response.status_code == 429:
+            response.headers['Retry-After'] = '60'
+        return response
 
-    def require_auth(self):
-        status = self.server.login_limiter.authenticate(self.client_address[0], self.authorized())
+    @app.before_request
+    def authenticate():
+        # WSGI PATH_INFO is decoded. Match the raw URI too so encoded separators
+        # cannot expose an alias of the private prefix. Waitress supplies REQUEST_URI.
+        raw = request.environ.get('REQUEST_URI', request.environ.get('RAW_URI', request.path))
+        path = urlsplit(raw).path
+        prefix = settings.path
+        if '%' in path or not path.startswith(prefix + '/'):
+            if path == prefix and prefix and request.method == 'GET':
+                return redirect(prefix + '/', code=308)
+            return reply(404, {'error': '页面不存在'})
+        valid = hmac.compare_digest(request.headers.get('Authorization', '').encode(), expected)
+        status = limiter.authenticate(request.remote_addr or '', valid)
         if status != 200:
-            self.send(status, {'error': '登录失败过多，请稍后再试' if status == 429 else '请使用配置的管理用户名和密码登录'})
-            return False
-        return True
+            return reply(status, {'error': '登录失败过多，请稍后再试' if status == 429 else '请使用配置的管理用户名和密码登录'})
 
-    def route(self):
-        """Match the configured prefix exactly, before issuing an auth challenge."""
-        try:
-            path = urlsplit(self.path).path
-        except ValueError:
-            return None
-        prefix = self.server.gui_path
-        if prefix and path == prefix:
-            return ''
-        if path.startswith(prefix + '/'):
-            return path[len(prefix):]
-        return None
+    def read_links():
+        result = subprocess.run(['singdock', 'links'], capture_output=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError('links unavailable')
+        return result.stdout.decode()
 
-    def do_GET(self):
-        path = self.route()
-        if path is None:
-            return self.send(404, {'error': '页面不存在'})
-        if path == '':
-            # Relative assets and API calls need the canonical trailing slash.
-            self.send_response(308)
-            self.send_header('Location', self.server.gui_path + '/')
-            self.send_header('Content-Length', '0')
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
-            return
-        if not self.require_auth():
-            return
+    @app.get(settings.path + '/api/nodes')
+    def nodes():
         try:
-            if path == '/api/nodes':
-                return self.send(200, self.server.manager.snapshot())
-            if path == '/api/links':
-                result = subprocess.run(['singdock', 'links'], capture_output=True, timeout=30)
-                if result.returncode:
-                    raise RuntimeError('节点链接获取失败，请检查 PUBLIC_HOST')
-                return self.send(200, {'links': result.stdout.decode()})
-            assets = {'/': ('index.html', 'text/html; charset=utf-8'),
-                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
-                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
-            if path in assets:
-                name, kind = assets[path]
-                return self.send(200, (ROOT / name).read_bytes(), kind)
-            self.send(404, {'error': '页面不存在'})
+            return reply(200, manager.snapshot())
         except Exception:
-            self.send(503, {'error': '读取失败，请检查容器状态'})
+            return reply(503, {'error': '读取失败，请检查容器状态'})
 
-    def do_POST(self):
-        path = self.route()
-        if path not in ('/api/preview', '/api/apply'):
-            return self.send(404, {'error': '接口不存在'})
-        if not self.require_auth():
-            return
-        # Custom header forces cross-site requests through a preflight we do not allow.
-        if self.headers.get('X-SingDock-Request') != '1' or self.headers.get('Content-Type') != 'application/json':
-            return self.send(403, {'error': '请求来源校验失败'})
-        if self.headers.get('Transfer-Encoding') is not None or len(self.headers.get_all('Content-Length', [])) != 1:
-            return self.send(400, {'error': '请求长度格式无效'})
+    @app.get(settings.path + '/api/links')
+    def links():
         try:
-            length = int(self.headers.get('Content-Length', '0'))
-            if not 0 < length <= 16384:
-                raise ValueError('请求大小无效')
-            raw = self.rfile.read(length)
-            if len(raw) != length:
+            return reply(200, {'links': (links_provider or read_links)()})
+        except Exception:
+            return reply(503, {'error': '读取失败，请检查容器状态'})
+
+    def change(apply):
+        # This header forces cross-site browsers through a preflight; no CORS is enabled.
+        if request.headers.get('X-SingDock-Request') != '1' or request.headers.get('Content-Type') != 'application/json':
+            return reply(403, {'error': '请求来源校验失败'})
+        if not request.content_length:
+            return reply(400, {'error': '请求长度格式无效'})
+        try:
+            raw = request.get_data()
+            if len(raw) != request.content_length:
                 raise ValueError('请求未完整发送')
             body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError('请求格式无效')
-            result = self.server.manager.change(body.get('ports'), body.get('revision'), path == '/api/apply')
-            self.send(200, result)
-        except (json.JSONDecodeError, TypeError):
-            self.send(400, {'error': '端口或配置无效，请刷新并检查端口范围、重复和占用情况'})
+            return reply(200, manager.change(body.get('ports'), body.get('revision'), apply))
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            return reply(400, {'error': '端口或配置无效，请刷新并检查端口范围、重复和占用情况'})
         except ValueError as error:
-            self.send(400, {'error': str(error)})
+            return reply(400, {'error': str(error)})
         except RuntimeError as error:
-            self.send(409, {'error': str(error)})
+            return reply(409, {'error': str(error)})
+        except HTTPException:
+            raise
         except Exception:
-            self.send(500, {'error': '操作失败，请检查容器日志'})
+            return reply(500, {'error': '操作失败，请检查容器日志'})
 
-    def setup(self):
-        super().setup()
-        self.connection.settimeout(15)
+    app.add_url_rule(settings.path + '/api/preview', 'preview', lambda: change(False), methods=['POST'], provide_automatic_options=False)
+    app.add_url_rule(settings.path + '/api/apply', 'apply', lambda: change(True), methods=['POST'], provide_automatic_options=False)
+
+    def asset(name, kind):
+        return Response((ROOT / name).read_bytes(), content_type=kind)
+
+    for suffix, name, kind in [('/', 'index.html', 'text/html; charset=utf-8'),
+                               ('/app.js', 'app.js', 'text/javascript; charset=utf-8'),
+                               ('/style.css', 'style.css', 'text/css; charset=utf-8')]:
+        app.add_url_rule(settings.path + suffix, name,
+                         lambda name=name, kind=kind: asset(name, kind), methods=['GET'])
+
+    @app.errorhandler(HTTPException)
+    def http_error(error):
+        return reply(error.code, {'error': '请求无效' if error.code != 404 else '页面不存在'})
+
+    @app.errorhandler(Exception)
+    def unexpected_error(_):
+        return reply(500, {'error': '操作失败，请检查容器日志'})
+
+    return app
+
+
+def make_server(app, host, port):
+    return create_server(app, host=host, port=port, threads=8,
+                         connection_limit=32, backlog=32, channel_timeout=15,
+                         cleanup_interval=5, max_request_body_size=MAX_BODY,
+                         max_request_header_size=8192, expose_tracebacks=False,
+                         log_socket_errors=False, clear_untrusted_proxy_headers=True)
 
 
 def main():
@@ -131,12 +138,7 @@ def main():
         settings = Settings.from_env()
     except ValueError as error:
         raise SystemExit(str(error))
-    server = BoundedHTTPServer((settings.bind, settings.port), Handler)
-    server.username = settings.username
-    server.password = settings.password
-    server.gui_path = settings.path
-    server.manager = PortManager('/opt/sing-box', (settings.port, 40000))
-    server.serve_forever()
+    make_server(create_app(settings), settings.bind, settings.port).run()
 
 
 if __name__ == '__main__':

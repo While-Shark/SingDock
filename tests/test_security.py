@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
-from http_security import LoginLimiter, BoundedHTTPServer
+from http_security import LoginLimiter
 import test_gui
 
 reader_path = Path(__file__).resolve().parents[1] / 'docker/read_env.py'
@@ -108,18 +108,6 @@ class LimiterTest(unittest.TestCase):
         self.assertEqual(limiter.authenticate('next', False), 429)
         self.assertLessEqual(len(limiter.failures), 100)
 
-    def test_worker_limit_is_nonblocking(self):
-        class Server(BoundedHTTPServer):
-            def shutdown_request(self, request):
-                self.rejected = request
-        from server import Handler
-        server = Server(('127.0.0.1', 0), Handler, max_workers=1)
-        self.addCleanup(server.server_close)
-        server.slots.acquire()
-        sentinel = object()
-        server.process_request(sentinel, ('127.0.0.1', 1))
-        self.assertIs(server.rejected, sentinel)
-        server.slots.release()
 
 
 class HttpSecurityTest(test_gui.HttpTest):
@@ -134,17 +122,49 @@ class HttpSecurityTest(test_gui.HttpTest):
         self.assertEqual(error.exception.code, 429)
         self.assertEqual(error.exception.headers['Retry-After'], '60')
 
-    def test_conflicting_lengths_and_transfer_encoding_rejected(self):
-        body = b'{}'
-        for extra in ('Content-Length: 2\r\nContent-Length: 3',
-                      'Content-Length: 2\r\nTransfer-Encoding: chunked'):
-            with self.subTest(extra=extra), socket.create_connection(('127.0.0.1', self.server.server_port), timeout=5) as conn:
-                data = (f'POST /api/apply HTTP/1.0\r\nAuthorization: {self.auth}\r\n'
-                        f'Content-Type: application/json\r\nX-SingDock-Request: 1\r\n{extra}\r\n\r\n').encode() + body
-                conn.sendall(data)
-                response = conn.recv(4096)
-                self.assertIn(b' 400 ', response.split(b'\r\n')[0])
+    def raw_request(self, headers, body):
+        with socket.create_connection(('127.0.0.1', self.server.effective_port), timeout=5) as conn:
+            data = (f'POST /api/apply HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nAuthorization: {self.auth}\r\n'
+                    f'Content-Type: application/json\r\nX-SingDock-Request: 1\r\n{headers}\r\n\r\n').encode() + body
+            conn.sendall(data)
+            return conn.recv(4096)
+
+    def test_conflicting_lengths_and_unsupported_transfer_encoding_rejected(self):
+        for headers, status in [('Content-Length: 2\r\nContent-Length: 3', b' 400 '),
+                                ('Content-Length: 2\r\nTransfer-Encoding: gzip', b' 501 ')]:
+            with self.subTest(headers=headers):
+                self.assertIn(status, self.raw_request(headers, b'{}').split(b'\r\n')[0])
         self.assertEqual(self.calls, [])
+
+    def test_chunked_body_is_normalized_even_with_mismatched_length(self):
+        import json
+        from ports import revision
+        body = json.dumps({'ports': {'ss': 22001}, 'revision': revision(self.raw)}).encode()
+        chunked = f'{len(body):x}\r\n'.encode() + body + b'\r\n0\r\n\r\n'
+        response = self.raw_request('Content-Length: 999\r\nTransfer-Encoding: chunked', chunked)
+        self.assertIn(b' 200 ', response.split(b'\r\n')[0])
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.manager.snapshot()['nodes'][0]['port'], 22001)
+
+    def test_oversized_body_rejected_before_mutation(self):
+        from urllib.error import HTTPError
+        with self.assertRaises(HTTPError) as error:
+            self.request('/api/apply', {'padding': 'x' * 16384})
+        self.assertEqual(error.exception.code, 413)
+        self.assertEqual(self.calls, [])
+
+    def test_invalid_json_and_internal_errors_do_not_expose_details(self):
+        from server import create_app
+        client = create_app(self.settings, self.manager).test_client()
+        headers = {'Authorization': self.auth, 'X-SingDock-Request': '1', 'Content-Type': 'application/json'}
+        for body in (b'\xff', b'{', b'[]'):
+            self.assertEqual(client.post('/api/apply', data=body, headers=headers).status_code, 400)
+        from unittest.mock import patch
+        with patch.object(self.manager, 'snapshot', side_effect=Exception('secret-internal-path')):
+            response = client.get('/api/nodes', headers=headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(b'secret-internal-path', response.data)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
 
 
 if __name__ == '__main__':

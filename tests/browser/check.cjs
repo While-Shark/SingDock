@@ -13,7 +13,7 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const [name, viewport] of [['desktop', {width:1280, height:900}], ['mobile', {width:390, height:844}]]) {
-      const context = await browser.newContext({viewport, httpCredentials:credentials});
+      const context = await browser.newContext({viewport, httpCredentials:{...credentials, send:'always'}});
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin});
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
@@ -69,7 +69,7 @@ async function main() {
         headers:{'X-SingDock-Request':'1', 'Content-Type':'application/json'},
         data:{ports:{'ss': name === 'desktop' ? 35000 : 35001}, revision:state.revision}
       });
-      assert(competing.ok());
+      assert(competing.ok(), `Competing update failed (${competing.status()}): ${await competing.text()}`);
       await page.locator('#apply').click();
       await page.waitForFunction(() => document.getElementById('confirmation-notice').textContent.includes('配置已变化'));
       assert(await page.locator('#confirmation-notice').isVisible());

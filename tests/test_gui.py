@@ -9,13 +9,11 @@ import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 from ports import PortManager, plan, revision
-from server import Handler
-from http_security import BoundedHTTPServer
+from server import create_app, make_server
 from settings import Settings
 
 CONFIG = {'inbounds': [
@@ -118,21 +116,20 @@ class PortsTest(Fixture):
 class HttpTest(Fixture):
     def setUp(self):
         super().setUp()
-        self.server = BoundedHTTPServer(('127.0.0.1', 0), Handler)
-        self.server.manager = self.manager
-        self.server.username = 'admin'
-        self.server.gui_path = ''
-        self.server.password = 'test-password-123456'
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.settings = Settings('admin', 'test-password-123456', '', 18100, '127.0.0.1')
+        if isinstance(self, CustomPathTest):
+            self.settings = Settings('manager', 'custom:password-123456', '/private/control', 18100, '127.0.0.1')
+        self.server = make_server(create_app(self.settings, self.manager), '127.0.0.1', 0)
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
         self.thread.start()
         self.addCleanup(self.stop_server)
-        self.url = f'http://127.0.0.1:{self.server.server_port}'
+        self.url = f'http://127.0.0.1:{self.server.effective_port}'
         self.auth = 'Basic ' + base64.b64encode(b'admin:test-password-123456').decode()
 
     def stop_server(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
+        self.server.task_dispatcher.shutdown()
+        self.server.close()
+        self.thread.join(timeout=3)
 
     def request(self, path, body=None, auth=True, csrf=True):
         headers = {'Authorization': self.auth} if auth else {}
@@ -195,11 +192,8 @@ class SettingsTest(unittest.TestCase):
 class CustomPathTest(HttpTest):
     def setUp(self):
         super().setUp()
-        self.server.username = 'manager'
-        self.server.password = 'custom:password-123456'
-        self.server.gui_path = '/private/control'
         self.auth = 'Basic ' + base64.b64encode(b'manager:custom:password-123456').decode()
-        self.url += self.server.gui_path
+        self.url += self.settings.path
 
     def test_old_username_is_not_accepted(self):
         self.auth = 'Basic ' + base64.b64encode(b'admin:custom:password-123456').decode()
@@ -208,7 +202,7 @@ class CustomPathTest(HttpTest):
         self.assertEqual(result.exception.code, 401)
 
     def test_root_and_other_prefixes_do_not_expose_gui(self):
-        origin = self.url.removesuffix(self.server.gui_path)
+        origin = self.url.removesuffix(self.settings.path)
         for path in ('/', '/api/nodes', '/app.js', '/private/control-other/', '/private%2fcontrol/'):
             with self.subTest(path=path), self.assertRaises(HTTPError) as result:
                 urlopen(origin + path, timeout=5)
