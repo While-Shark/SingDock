@@ -5,6 +5,9 @@ export SINGDOCK_SOURCE_ONLY=1 SBP_SKIP_DEPS=1
 export SBP_ROOT="${SBP_ROOT:-/opt/sing-box/.bootstrap}"
 requested_warp="${ENABLE_WARP:-false}"
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if [[ "${1:-menu}" == gui-info ]]; then
+  exec python3 /opt/singdock/web/gui_info.py
+fi
 # Keep bootstrap executables away from the writable data volume.
 export SBP_BIN_DIR=/opt/singdock/bootstrap-bin
 source /opt/singdock/upstream/sing-box-plus.sh
@@ -162,5 +165,5 @@ case "${1:-menu}" in
   status) ctl status ;;
   ports) jq -r '.inbounds[] | [.tag, (.listen_port|tostring), (if .type=="hysteria2" or .type=="tuic" then "UDP" elif .type=="shadowsocks" then "TCP+UDP" else "TCP" end)] | @tsv' "$CONF_JSON" ;;
   check) "$BIN_PATH" check -c "$CONF_JSON" ;;
-  *) echo "用法: singdock [menu|init|links [4|6]|restart|rotate-ports|status|ports|check]" >&2; exit 2 ;;
+  *) echo "用法: singdock [menu|init|links [4|6]|restart|rotate-ports|status|ports|check|gui-info]" >&2; exit 2 ;;
 esac
