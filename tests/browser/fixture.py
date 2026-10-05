@@ -1,5 +1,6 @@
 """Synthetic nodes for browser verification; never starts real proxies."""
 import json
+import os
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -13,7 +14,7 @@ from server import Handler
 
 class FixtureHandler(Handler):
     def do_GET(self):
-        if self.path == '/api/links' and self.authorized():
+        if self.route() == '/api/links' and self.authorized():
             port = next(node['port'] for node in self.server.manager.snapshot()['nodes'] if node['tag'] == 'ss')
             return self.send(200, {'links': f'ss://synthetic-test-credential@example.invalid:{port}#ss'})
         super().do_GET()
@@ -29,6 +30,8 @@ def main():
         (root / 'config.json').write_text(json.dumps(config))
         (root / 'ports.env').write_text(''.join(f'{key}={30000 + i}\n' for i, key in enumerate(PORT_KEYS.values())))
         server = ThreadingHTTPServer(('127.0.0.1', 18101), FixtureHandler)
+        server.username = os.environ.get('GUI_USERNAME', 'admin')
+        server.gui_path = os.environ.get('GUI_PATH', '/').rstrip('/')
         server.password = 'synthetic-browser-password'
         # Probe/core/restart already have real container coverage in smoke.sh.
         # Here only the browser and production HTTP/transaction code are exercised.

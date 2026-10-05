@@ -10,6 +10,19 @@ permissions:
 jobs:
   browser:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: root
+            path: /
+            username: admin
+          - name: custom
+            path: /private/control
+            username: gui-manager
+    env:
+      GUI_PATH: ${{ matrix.config.path }}
+      GUI_USERNAME: ${{ matrix.config.username }}
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +42,7 @@ jobs:
           trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
           ready=false
           for attempt in $(seq 1 30); do
-            if curl --silent --output /dev/null --fail --user admin:synthetic-browser-password http://127.0.0.1:18101/api/nodes; then ready=true; break; fi
+            if curl --silent --output /dev/null --fail --user "$GUI_USERNAME:synthetic-browser-password" "http://127.0.0.1:18101${GUI_PATH%/}/api/nodes"; then ready=true; break; fi
             sleep 1
           done
           if [ "$ready" != true ]; then cat "$RUNNER_TEMP/singdock-fixture.log"; exit 1; fi
@@ -38,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gui-browser-screenshots
+          name: gui-browser-screenshots-${{ matrix.config.name }}
           path: browser-results/*.png
           retention-days: 7
           if-no-files-found: ignore

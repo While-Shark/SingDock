@@ -20,7 +20,7 @@ async function action(fn) {
   finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); }
 }
 async function refresh() {
-  snapshot = await api('/api/nodes'); pending = null;
+  snapshot = await api('api/nodes'); pending = null;
   $('count').textContent = snapshot.nodes.length;
   $('nodes').replaceChildren(); $('all').checked = false;
   for (const node of snapshot.nodes) {
@@ -55,13 +55,13 @@ $('preview').onclick = () => action(async () => {
   }
   if (!Object.keys(ports).length) throw Error('尚未修改端口');
   pending = {ports, revision:snapshot.revision};
-  const result = await api('/api/preview', pending); $('changes').replaceChildren();
+  const result = await api('api/preview', pending); $('changes').replaceChildren();
   for (const change of result.changes) { const row = document.createElement('div'); row.className = 'change'; const name = document.createElement('span'); name.textContent = change.tag; const value = document.createElement('strong'); value.textContent = `${change.before} → ${change.after}`; row.append(name, value); $('changes').append(row); }
   $('confirmation-notice').textContent = ''; $('confirmation').showModal();
 });
 $('cancel').onclick = () => $('confirmation').close();
-$('apply').onclick = () => action(async () => { const result = await api('/api/apply', pending); $('confirmation').close(); await refresh(); notice(result.applied ? '端口已应用，服务已重启。请放行防火墙并更新客户端链接。' : '没有需要应用的变更。'); });
-$('links').onclick = () => action(async () => { $('share-text').value = (await api('/api/links')).links; $('share-notice').textContent = ''; $('share').showModal(); });
+$('apply').onclick = () => action(async () => { const result = await api('api/apply', pending); $('confirmation').close(); await refresh(); notice(result.applied ? '端口已应用，服务已重启。请放行防火墙并更新客户端链接。' : '没有需要应用的变更。'); });
+$('links').onclick = () => action(async () => { $('share-text').value = (await api('api/links')).links; $('share-notice').textContent = ''; $('share').showModal(); });
 $('close-share').onclick = () => $('share').close();
 $('share').addEventListener('close', () => { $('share-text').value = ''; });
 $('copy').onclick = () => action(async () => { await navigator.clipboard.writeText($('share-text').value); notice('分享链接已复制。'); });

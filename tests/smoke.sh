@@ -26,7 +26,8 @@ start() {
   [[ "$mode" != host ]] || server_network=host
   docker run -d --name "$server" --network "$server_network" \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
-    -e ENABLE_GUI=true -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \
+    -e ENABLE_GUI=true -e GUI_USERNAME=smoke-manager -e GUI_PATH=/private/control \
+    -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \
     -e REALITY_SERVER=localhost -e REALITY_SERVERS=localhost \
     -v "$volume:/opt/sing-box" "$image" >/dev/null
   for _ in {1..60}; do

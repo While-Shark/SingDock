@@ -3,11 +3,11 @@ import base64
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import os
 from pathlib import Path
 import subprocess
 from urllib.parse import urlsplit
 from ports import PortManager
+from settings import Settings
 
 ROOT = Path(__file__).parent
 
@@ -31,13 +31,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def authorized(self):
-        token = base64.b64encode(('admin:' + self.server.password).encode()).decode()
-        return hmac.compare_digest(self.headers.get('Authorization', ''), 'Basic ' + token)
+        token = base64.b64encode((self.server.username + ':' + self.server.password).encode()).decode()
+        return hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Basic ' + token).encode())
+
+    def route(self):
+        """Match the configured prefix exactly, before issuing an auth challenge."""
+        try:
+            path = urlsplit(self.path).path
+        except ValueError:
+            return None
+        prefix = self.server.gui_path
+        if prefix and path == prefix:
+            return ''
+        if path.startswith(prefix + '/'):
+            return path[len(prefix):]
+        return None
 
     def do_GET(self):
+        path = self.route()
+        if path is None:
+            return self.send(404, {'error': '页面不存在'})
+        if path == '':
+            # Relative assets and API calls need the canonical trailing slash.
+            self.send_response(308)
+            self.send_header('Location', self.server.gui_path + '/')
+            self.send_header('Content-Length', '0')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            return
         if not self.authorized():
-            return self.send(401, {'error': '请使用 admin 和管理密码登录'})
-        path = urlsplit(self.path).path
+            return self.send(401, {'error': '请使用配置的管理用户名和密码登录'})
         try:
             if path == '/api/nodes':
                 return self.send(200, self.server.manager.snapshot())
@@ -57,14 +80,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send(503, {'error': '读取失败，请检查容器状态'})
 
     def do_POST(self):
+        path = self.route()
+        if path not in ('/api/preview', '/api/apply'):
+            return self.send(404, {'error': '接口不存在'})
         if not self.authorized():
             return self.send(401, {'error': '请先登录'})
         # Custom header forces cross-site requests through a preflight we do not allow.
         if self.headers.get('X-SingDock-Request') != '1' or self.headers.get('Content-Type') != 'application/json':
             return self.send(403, {'error': '请求来源校验失败'})
-        path = urlsplit(self.path).path
-        if path not in ('/api/preview', '/api/apply'):
-            return self.send(404, {'error': '接口不存在'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 < length <= 16384:
@@ -89,13 +112,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    password = os.environ.get('GUI_PASSWORD', '')
-    if len(password) < 16 or ':' in password:
-        raise SystemExit('GUI_PASSWORD must contain at least 16 characters and no colon')
-    port = int(os.environ.get('GUI_PORT', '18100'))
-    server = ThreadingHTTPServer((os.environ.get('GUI_BIND', '127.0.0.1'), port), Handler)
-    server.password = password
-    server.manager = PortManager('/opt/sing-box', (port, 40000))
+    try:
+        settings = Settings.from_env()
+    except ValueError as error:
+        raise SystemExit(str(error))
+    server = ThreadingHTTPServer((settings.bind, settings.port), Handler)
+    server.username = settings.username
+    server.password = settings.password
+    server.gui_path = settings.path
+    server.manager = PortManager('/opt/sing-box', (settings.port, 40000))
     server.serve_forever()
 
 

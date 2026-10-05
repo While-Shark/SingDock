@@ -5,11 +5,7 @@ if [[ "${1:-serve}" != serve ]]; then exec singdock "$@"; fi
 [[ "${ENABLE_WARP:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_WARP must be true or false"; exit 1; }
 [[ "${ENABLE_GUI:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_GUI must be true or false"; exit 1; }
 if [[ "${ENABLE_GUI:-false}" == true ]]; then
-  gui_password="${GUI_PASSWORD:-}"
-  [[ ${#gui_password} -ge 16 && "$gui_password" != *:* ]] || { echo "Set GUI_PASSWORD (16+ characters, no colon)"; exit 1; }
-  gui_port="${GUI_PORT:-18100}"
-  [[ "$gui_port" =~ ^[1-9][0-9]{3,4}$ ]] && (( gui_port >= 1024 && gui_port <= 65535 )) || { echo "Invalid GUI_PORT"; exit 1; }
-  [[ "${GUI_PORT:-18100}" != 40000 ]] || { echo "GUI_PORT conflicts with WARP"; exit 1; }
+  python3 /opt/singdock/web/settings.py
 fi
 mkdir -p /opt/sing-box /run/singdock /var/lib/cloudflare-warp
 supervisor_pid=''

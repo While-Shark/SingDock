@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 from ports import PortManager, plan, revision
 from server import Handler
+from settings import Settings
 
 CONFIG = {'inbounds': [
     {'tag': 'ss', 'type': 'shadowsocks', 'listen_port': 21001, 'password': 'secret'},
@@ -118,6 +119,8 @@ class HttpTest(Fixture):
         super().setUp()
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.server.manager = self.manager
+        self.server.username = 'admin'
+        self.server.gui_path = ''
         self.server.password = 'test-password-123456'
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -165,6 +168,63 @@ class HttpTest(Fixture):
         with self.assertRaises(HTTPError) as result:
             self.request('/../ports.env')
         self.assertEqual(result.exception.code, 404)
+
+
+class SettingsTest(unittest.TestCase):
+    def test_defaults_preserve_existing_login_and_root_path(self):
+        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456'})
+        self.assertEqual((settings.username, settings.path, settings.port), ('admin', '', 18100))
+
+    def test_custom_username_password_and_nested_path(self):
+        settings = Settings.from_env({'GUI_USERNAME': '管理者', 'GUI_PASSWORD': 'custom:password-123456', 'GUI_PATH': '/private/control/'})
+        self.assertEqual(settings.username, '管理者')
+        self.assertEqual(settings.password, 'custom:password-123456')
+        self.assertEqual(settings.path, '/private/control')
+
+    def test_invalid_settings_rejected_without_exposing_password(self):
+        bad = [({'GUI_USERNAME': ''}), ({'GUI_USERNAME': 'a:b'}), ({'GUI_USERNAME': ' admin'}),
+               ({'GUI_PASSWORD': 'short'}), ({'GUI_PASSWORD': 'test-password-123456\n'}),
+               *[{'GUI_PATH': p} for p in ['private', '//private', '/a//b', '/a/../b', '/a%2fb', '/a?x=1', '/a#b', '/a.b']],
+               {'GUI_PORT': '40000'}, {'GUI_PORT': '65536'}, {'GUI_PORT': '0'}]
+        for values in bad:
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                Settings.from_env({'GUI_PASSWORD': 'test-password-123456', **values})
+
+
+class CustomPathTest(HttpTest):
+    def setUp(self):
+        super().setUp()
+        self.server.username = 'manager'
+        self.server.password = 'custom:password-123456'
+        self.server.gui_path = '/private/control'
+        self.auth = 'Basic ' + base64.b64encode(b'manager:custom:password-123456').decode()
+        self.url += self.server.gui_path
+
+    def test_old_username_is_not_accepted(self):
+        self.auth = 'Basic ' + base64.b64encode(b'admin:custom:password-123456').decode()
+        with self.assertRaises(HTTPError) as result:
+            self.request('/api/nodes')
+        self.assertEqual(result.exception.code, 401)
+
+    def test_root_and_other_prefixes_do_not_expose_gui(self):
+        origin = self.url.removesuffix(self.server.gui_path)
+        for path in ('/', '/api/nodes', '/app.js', '/private/control-other/', '/private%2fcontrol/'):
+            with self.subTest(path=path), self.assertRaises(HTTPError) as result:
+                urlopen(origin + path, timeout=5)
+            self.assertEqual(result.exception.code, 404)
+            self.assertIsNone(result.exception.headers.get('WWW-Authenticate'))
+
+    def test_custom_path_page_assets_and_redirect(self):
+        with self.request('') as response:
+            self.assertEqual(response.geturl(), self.url + '/')
+            html = response.read().decode()
+            self.assertIn('href="./style.css"', html)
+            self.assertIn('src="./app.js"', html)
+        for path in ('/app.js', '/style.css'):
+            with self.request(path) as response:
+                self.assertEqual(response.status, 200)
+        with self.request('/api/nodes?refresh=1') as response:
+            self.assertEqual(len(json.load(response)['nodes']), 2)
 
 
 if __name__ == '__main__':
