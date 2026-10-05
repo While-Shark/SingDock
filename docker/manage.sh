@@ -74,6 +74,7 @@ write_config() {
   # Disabled WARP must remove its listeners too (upstream kept them direct).
   jq --arg enabled "$ENABLE_WARP" '
     .outbounds |= map(select(.type != "block")) |
+    .route.default_domain_resolver = "dns-remote" |
     if $enabled != "true" then
       .inbounds |= map(select(.tag | endswith("-warp") | not))
     else . end' "$candidate" > "$candidate.clean"

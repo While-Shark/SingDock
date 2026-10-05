@@ -31,6 +31,8 @@ start() {
 start
 docker exec "$server" singdock check
 docker exec "$server" jq -e '.inbounds | length == 10' /opt/sing-box/config.json >/dev/null
+docker exec "$server" jq -e '.route.default_domain_resolver as $resolver |
+  $resolver == "dns-remote" and any(.dns.servers[]; .tag == $resolver)' /opt/sing-box/config.json >/dev/null
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
 identity=$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')
 docker exec "$server" singdock init
@@ -50,7 +52,8 @@ docker exec "$server" bash -c '
     {inbounds:[{type:\"mixed\",listen:\"127.0.0.1\",listen_port:19080}],
      outbounds:[{type:\"shadowsocks\",tag:\"proxy\",server:\$server,
        server_port:.listen_port,method:.method,password:.password}],
-     route:{final:\"proxy\"}}" /opt/sing-box/config.json > /tmp/client.json
+     dns:{servers:[{type:\"local\",tag:\"dns-local\"}]},
+     route:{final:\"proxy\",default_domain_resolver:\"dns-local\"}}" /opt/sing-box/config.json > /tmp/client.json
   sing-box check -c /tmp/client.json'
 docker exec -d "$server" sing-box run -c /tmp/client.json
 http_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http")
