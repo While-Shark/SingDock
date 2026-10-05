@@ -63,20 +63,24 @@ docker exec "$server" singdock links > /tmp/singdock-links-"$suffix"
 test "$(grep -Ec '^  (vless|trojan|hy2|vmess|ss|tuic|anytls)://' /tmp/singdock-links-"$suffix")" -ge 10
 ! grep -q -- '-warp' /tmp/singdock-links-"$suffix"
 rm /tmp/singdock-links-"$suffix"
-# Actual Shadowsocks TCP handshake -> isolated HTTP server, no public probe.
-docker exec "$server" bash -c '
-  jq --arg server "127.0.0.1" ".inbounds[] | select(.tag == \"ss\") |
-    {inbounds:[{type:\"mixed\",listen:\"127.0.0.1\",listen_port:19080}],
-     outbounds:[{type:\"shadowsocks\",tag:\"proxy\",server:\$server,
-       server_port:.listen_port,method:.method,password:.password}],
-     dns:{servers:[{type:\"local\",tag:\"dns-local\"}]},
-     route:{final:\"proxy\",default_domain_resolver:\"dns-local\"}}" /opt/sing-box/config.json > /tmp/client.json
-  sing-box check -c /tmp/client.json'
-docker exec -d "$server" sing-box run -c /tmp/client.json
+# Actual protocol handshakes -> isolated HTTP server, no public probe.
+# Hysteria2 and TUIC use UDP to the node; the target request remains TCP.
+docker cp "$(dirname "$0")/client_config.py" "$server:/tmp/client_config.py"
 http_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http")
-docker exec "$server" curl --retry 10 --retry-connrefused --retry-delay 1 \
-  --max-time 20 --noproxy '' --proxy socks5h://127.0.0.1:19080 "http://$http_ip:8080/" | grep -q singdock-smoke-ok
+for protocol in ss ss2022 vmess-ws hy2 hy2-obfs tuic-v5 anytls; do
+  client="/tmp/client-$protocol.json"
+  port=$(docker exec "$server" python3 /tmp/client_config.py /opt/sing-box/config.json "$protocol" "$client")
+  docker exec "$server" sing-box check -c "$client"
+  docker exec -d "$server" sh -c 'exec sing-box run -c "$1" > "$2" 2>&1' sh "$client" "/tmp/client-$protocol.log"
+  if ! docker exec "$server" curl --retry 10 --retry-connrefused --retry-delay 1 \
+      --max-time 20 --noproxy '' --proxy "socks5h://127.0.0.1:$port" "http://$http_ip:8080/" | grep -q singdock-smoke-ok; then
+    echo "Proxy handshake failed: $protocol" >&2
+    docker exec "$server" cat "/tmp/client-$protocol.log" >&2 || true
+    exit 1
+  fi
+  echo "PASS: $protocol handshake and TCP target"
+done
 docker exec "$server" singdock rotate-ports
 docker exec "$server" singdock check
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
-echo "PASS ($mode): config, rejected candidate, identity persistence, shutdown, links, Shadowsocks TCP, port rotation"
+echo "PASS ($mode): config, rejected candidate, identity persistence, shutdown, links, seven protocol handshakes, port rotation"

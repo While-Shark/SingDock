@@ -26,6 +26,8 @@ jobs:
           for script in docker/*.sh upstream/sing-box-plus.sh tests/smoke.sh; do
             bash -n "$script"
           done
+      - name: Test helper syntax
+        run: python3 -m py_compile tests/client_config.py
       - name: Compose configuration
         run: docker compose config --quiet
       - name: Build
@@ -36,7 +38,7 @@ jobs:
         run: |
           test "$(docker image inspect -f '{{.Architecture}}' singdock:test)" = "$EXPECTED_ARCH"
           docker run --rm --entrypoint /usr/local/bin/sing-box singdock:test version
-      - name: Deployment and real Shadowsocks handshake
+      - name: Deployment and seven real protocol handshakes
         run: bash tests/smoke.sh singdock:test ${{ matrix.network }}
   warp-build:
     name: warp-build (${{ matrix.platform.arch }})
