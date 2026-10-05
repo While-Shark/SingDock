@@ -9,12 +9,12 @@ import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 from ports import PortManager, plan, revision
-from server import Handler
+from server import create_app, make_server
+from settings import Settings
 
 CONFIG = {'inbounds': [
     {'tag': 'ss', 'type': 'shadowsocks', 'listen_port': 21001, 'password': 'secret'},
@@ -116,19 +116,20 @@ class PortsTest(Fixture):
 class HttpTest(Fixture):
     def setUp(self):
         super().setUp()
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.server.manager = self.manager
-        self.server.password = 'test-password-123456'
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.settings = Settings('admin', 'test-password-123456', '', 18100, '127.0.0.1')
+        if isinstance(self, CustomPathTest):
+            self.settings = Settings('manager', 'custom:password-123456', '/private/control', 18100, '127.0.0.1')
+        self.server = make_server(create_app(self.settings, self.manager), '127.0.0.1', 0)
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
         self.thread.start()
         self.addCleanup(self.stop_server)
-        self.url = f'http://127.0.0.1:{self.server.server_port}'
+        self.url = f'http://127.0.0.1:{self.server.effective_port}'
         self.auth = 'Basic ' + base64.b64encode(b'admin:test-password-123456').decode()
 
     def stop_server(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
+        self.server.task_dispatcher.shutdown()
+        self.server.close()
+        self.thread.join(timeout=3)
 
     def request(self, path, body=None, auth=True, csrf=True):
         headers = {'Authorization': self.auth} if auth else {}
@@ -165,6 +166,60 @@ class HttpTest(Fixture):
         with self.assertRaises(HTTPError) as result:
             self.request('/../ports.env')
         self.assertEqual(result.exception.code, 404)
+
+
+class SettingsTest(unittest.TestCase):
+    def test_defaults_preserve_existing_login_and_root_path(self):
+        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456'})
+        self.assertEqual((settings.username, settings.path, settings.port), ('admin', '', 18100))
+
+    def test_custom_username_password_and_nested_path(self):
+        settings = Settings.from_env({'GUI_USERNAME': '管理者', 'GUI_PASSWORD': 'custom:password-123456', 'GUI_PATH': '/private/control/'})
+        self.assertEqual(settings.username, '管理者')
+        self.assertEqual(settings.password, 'custom:password-123456')
+        self.assertEqual(settings.path, '/private/control')
+
+    def test_invalid_settings_rejected_without_exposing_password(self):
+        bad = [({'GUI_USERNAME': ''}), ({'GUI_USERNAME': 'a:b'}), ({'GUI_USERNAME': ' admin'}),
+               ({'GUI_PASSWORD': 'short'}), ({'GUI_PASSWORD': 'test-password-123456\n'}),
+               *[{'GUI_PATH': p} for p in ['private', '//private', '/a//b', '/a/../b', '/a%2fb', '/a?x=1', '/a#b', '/a.b']],
+               {'GUI_PORT': '40000'}, {'GUI_PORT': '65536'}, {'GUI_PORT': '0'}]
+        for values in bad:
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                Settings.from_env({'GUI_PASSWORD': 'test-password-123456', **values})
+
+
+class CustomPathTest(HttpTest):
+    def setUp(self):
+        super().setUp()
+        self.auth = 'Basic ' + base64.b64encode(b'manager:custom:password-123456').decode()
+        self.url += self.settings.path
+
+    def test_old_username_is_not_accepted(self):
+        self.auth = 'Basic ' + base64.b64encode(b'admin:custom:password-123456').decode()
+        with self.assertRaises(HTTPError) as result:
+            self.request('/api/nodes')
+        self.assertEqual(result.exception.code, 401)
+
+    def test_root_and_other_prefixes_do_not_expose_gui(self):
+        origin = self.url.removesuffix(self.settings.path)
+        for path in ('/', '/api/nodes', '/app.js', '/private/control-other/', '/private%2fcontrol/'):
+            with self.subTest(path=path), self.assertRaises(HTTPError) as result:
+                urlopen(origin + path, timeout=5)
+            self.assertEqual(result.exception.code, 404)
+            self.assertIsNone(result.exception.headers.get('WWW-Authenticate'))
+
+    def test_custom_path_page_assets_and_redirect(self):
+        with self.request('') as response:
+            self.assertEqual(response.geturl(), self.url + '/')
+            html = response.read().decode()
+            self.assertIn('href="./style.css"', html)
+            self.assertIn('src="./app.js"', html)
+        for path in ('/app.js', '/style.css'):
+            with self.request(path) as response:
+                self.assertEqual(response.status, 200)
+        with self.request('/api/nodes?refresh=1') as response:
+            self.assertEqual(len(json.load(response)['nodes']), 2)
 
 
 if __name__ == '__main__':

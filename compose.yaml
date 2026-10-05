@@ -8,10 +8,18 @@ services:
     container_name: singdock
     network_mode: host
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - MKNOD
+      - SYS_CHROOT
     environment:
       ENABLE_GUI: "${ENABLE_GUI:-false}"
       GUI_BIND: "${GUI_BIND:-127.0.0.1}"
       GUI_PORT: "${GUI_PORT:-18100}"
+      GUI_USERNAME: "${GUI_USERNAME:-admin}"
+      GUI_PATH: "${GUI_PATH:-/}"
       GUI_PASSWORD: "${GUI_PASSWORD:-}"
       ENABLE_WARP: "${ENABLE_WARP:-false}"
       WARP_ACCEPT_TOS: "${WARP_ACCEPT_TOS:-false}"

@@ -3,22 +3,23 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const baseURL = 'http://127.0.0.1:18101';
+const origin = 'http://127.0.0.1:18101';
+const baseURL = origin + (process.env.GUI_PATH || '/').replace(/\/$/, '');
 const screenshots = process.env.SCREENSHOT_DIR || 'browser-results';
-const credentials = {username:'admin', password:'synthetic-browser-password'};
+const credentials = {username:process.env.GUI_USERNAME || 'admin', password:'synthetic-browser-password'};
 
 async function main() {
   await fs.mkdir(screenshots, {recursive:true});
   const browser = await chromium.launch();
   try {
     for (const [name, viewport] of [['desktop', {width:1280, height:900}], ['mobile', {width:390, height:844}]]) {
-      const context = await browser.newContext({viewport, httpCredentials:credentials});
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin:baseURL});
+      const context = await browser.newContext({viewport, httpCredentials:{...credentials, send:'always'}});
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin});
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto(baseURL);
+      await page.goto(baseURL + '/');
       await page.locator('#nodes tr').nth(9).waitFor();
       await page.waitForFunction(() => document.getElementById('notice').textContent.includes('配置已加载'));
       assert.equal(await page.locator('#nodes tr').count(), 10);
@@ -68,7 +69,7 @@ async function main() {
         headers:{'X-SingDock-Request':'1', 'Content-Type':'application/json'},
         data:{ports:{'ss': name === 'desktop' ? 35000 : 35001}, revision:state.revision}
       });
-      assert(competing.ok());
+      assert(competing.ok(), `Competing update failed (${competing.status()}): ${await competing.text()}`);
       await page.locator('#apply').click();
       await page.waitForFunction(() => document.getElementById('confirmation-notice').textContent.includes('配置已变化'));
       assert(await page.locator('#confirmation-notice').isVisible());

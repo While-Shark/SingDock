@@ -4,7 +4,24 @@ umask 077
 export SINGDOCK_SOURCE_ONLY=1 SBP_SKIP_DEPS=1
 export SBP_ROOT="${SBP_ROOT:-/opt/sing-box/.bootstrap}"
 requested_warp="${ENABLE_WARP:-false}"
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Keep bootstrap executables away from the writable data volume.
+export SBP_BIN_DIR=/opt/singdock/bootstrap-bin
 source /opt/singdock/upstream/sing-box-plus.sh
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+safe_source_env() {
+  local file="$1" parsed key value
+  [[ -e "$file" ]] || return 1
+  parsed=$(mktemp /run/singdock/env.XXXXXX)
+  if ! python3 /opt/singdock/docker/read_env.py "$file" > "$parsed"; then
+    rm -f "$parsed"
+    die "持久化配置格式不安全，已拒绝加载"
+  fi
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    printf -v "$key" '%s' "$value"
+  done < "$parsed"
+  rm -f "$parsed"
+}
 SCRIPT_NAME="SingDock · Sing-Box-Plus 容器版"
 ctl() { supervisorctl -c /opt/singdock/docker/supervisord.conf "$@"; }
 
