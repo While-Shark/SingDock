@@ -28,7 +28,7 @@ start() {
     --security-opt no-new-privileges:true --cap-drop NET_RAW --cap-drop MKNOD --cap-drop SYS_CHROOT \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
     -e ENABLE_GUI=true -e GUI_USERNAME=smoke-manager -e GUI_PATH=auto \
-    -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \
+    -e GUI_PASSWORD= -e GUI_PORT=18100 \
     -e REALITY_SERVER=localhost -e REALITY_SERVERS=localhost \
     -v "$volume:/opt/sing-box" "$image" >/dev/null
   for _ in {1..60}; do
@@ -41,6 +41,13 @@ start() {
 start
 gui_path=$(docker exec "$server" cat /opt/sing-box/gui-path)
 [[ "$gui_path" =~ ^/panel-[0-9a-f]{32}$ ]]
+gui_password_hash=$(docker exec "$server" sha256sum /opt/sing-box/gui-password)
+docker exec "$server" sh -c 'test "$(stat -c %a /opt/sing-box/gui-password)" = 600'
+# Verify local login discovery without putting the generated secret in CI logs.
+docker exec "$server" singdock gui-info | grep -q '^密码: '
+if docker logs "$server" 2>&1 | docker exec -i "$server" python3 -c 'import pathlib,sys; p=pathlib.Path("/opt/sing-box/gui-password").read_text().strip(); sys.exit(0 if p in sys.stdin.read() else 1)'; then
+  echo "Generated GUI password leaked into startup logs" >&2; exit 1
+fi
 docker logs "$server" 2>&1 | grep -F "SingDock GUI: http://127.0.0.1:18100$gui_path/"
 docker exec "$server" sh -c 'test "$(stat -c %a /opt/sing-box/gui-path)" = 600'
 docker exec "$server" singdock check
@@ -67,6 +74,7 @@ test "$(docker inspect -f '{{.State.ExitCode}}' "$server")" != 137
 docker rm "$server" >/dev/null
 start
 test "$gui_path" = "$(docker exec "$server" cat /opt/sing-box/gui-path)"
+test "$gui_password_hash" = "$(docker exec "$server" sha256sum /opt/sing-box/gui-password)"
 docker logs "$server" 2>&1 | grep -F "SingDock GUI: http://127.0.0.1:18100$gui_path/"
 test "$identity" = "$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')"
 docker exec "$server" singdock links > /tmp/singdock-links-"$suffix"

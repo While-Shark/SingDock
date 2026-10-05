@@ -141,7 +141,7 @@ def main():
     server = make_server(create_app(settings), settings.bind, settings.port)
     host = '[' + settings.bind + ']' if ':' in settings.bind else settings.bind
     print(f'SingDock GUI: http://{host}:{settings.port}{settings.path}/', flush=True)
-    print('GUI login: use GUI_USERNAME and GUI_PASSWORD from your environment.', flush=True)
+    print('GUI login details: docker exec singdock singdock gui-info', flush=True)
     server.run()
 
 

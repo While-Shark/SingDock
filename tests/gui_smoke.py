@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 settings = Settings.from_env()
 url = f'http://127.0.0.1:{settings.port}{settings.path}'
-auth = 'Basic ' + base64.b64encode((os.environ.get('GUI_USERNAME', 'admin') + ':' + os.environ['GUI_PASSWORD']).encode()).decode()
+auth = 'Basic ' + base64.b64encode((settings.username + ':' + settings.password).encode()).decode()
 
 
 def request(path, body=None, authorized=True):
