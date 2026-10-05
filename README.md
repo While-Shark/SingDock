@@ -4,6 +4,8 @@
 
 **当前为首版测试实现。** 普通镜像与可选 WARP 镜像已通过 AMD64 构建；普通容器已通过启动、配置校验、身份持久化、端口更换及真实 Shadowsocks TCP 握手测试。目标是解决用户空间依赖，不保证旧宿主内核能运行所有协议或官方 WARP；其余协议握手、ARM64 和 CentOS 7/WARP 需实测后确认。
 
+AMD64 的 bridge/host 两种网络及错误配置保护测试均已通过。CI 现已加入 AMD64、ARM64 原生机器的相同测试和 WARP 二进制启动检查；ARM64 的通过状态以 [Actions](https://github.com/While-Shark/SingDock/actions) 为准。二进制版本检查不代表 WARP 注册、连接或出口验证通过。
+
 ## Docker Compose
 
 需要已安装 Docker；支持 Compose V2，也可以用支持 Compose Specification 的独立 `docker-compose`。
