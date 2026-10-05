@@ -1,0 +1,29 @@
+name: Container
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          for script in docker/*.sh upstream/sing-box-plus.sh tests/smoke.sh; do
+            bash -n "$script"
+          done
+      - name: Compose configuration
+        run: docker compose config --quiet
+      - name: Build
+        run: docker build -t singdock:test .
+      - name: Deployment and real Shadowsocks handshake
+        run: bash tests/smoke.sh
+  warp-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build optional WARP image (runtime remains experimental)
+        run: docker build --build-arg INSTALL_WARP=true -t singdock:warp .

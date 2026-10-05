@@ -1,0 +1,22 @@
+services:
+  singdock:
+    build:
+      context: .
+      args:
+        INSTALL_WARP: "${INSTALL_WARP:-false}"
+    image: singdock:local
+    container_name: singdock
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      ENABLE_WARP: "${ENABLE_WARP:-false}"
+      WARP_ACCEPT_TOS: "${WARP_ACCEPT_TOS:-false}"
+      PUBLIC_HOST: "${PUBLIC_HOST:-}"
+    volumes:
+      - ./data/sing-box:/opt/sing-box:Z
+      - ./data/warp:/var/lib/cloudflare-warp:Z
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
