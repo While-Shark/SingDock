@@ -120,16 +120,30 @@ class HttpTest(Fixture):
         if isinstance(self, CustomPathTest):
             self.settings = Settings('manager', 'custom:password-123456', '/private/control', 18100, '127.0.0.1')
         self.server = make_server(create_app(self.settings, self.manager), '127.0.0.1', 0)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.stopping = threading.Event()
+        self.server_errors = []
+        self.thread = threading.Thread(target=self.run_server, daemon=True)
         self.thread.start()
         self.addCleanup(self.stop_server)
         self.url = f'http://127.0.0.1:{self.server.effective_port}'
         self.auth = 'Basic ' + base64.b64encode(b'admin:test-password-123456').decode()
 
+    def run_server(self):
+        # Stop the loop before closing descriptors. Closing from another thread
+        # while Waitress is inside select() otherwise causes intermittent EBADF.
+        try:
+            while not self.stopping.is_set():
+                self.server.asyncore.loop(timeout=0.05, count=1, map=self.server._map)
+        except Exception as error:
+            self.server_errors.append(error)
+
     def stop_server(self):
-        self.server.task_dispatcher.shutdown()
-        self.server.close()
+        self.stopping.set()
         self.thread.join(timeout=3)
+        self.server.task_dispatcher.shutdown()
+        self.server.asyncore.close_all(self.server._map)
+        self.assertFalse(self.thread.is_alive(), 'WSGI fixture failed to stop')
+        self.assertEqual(self.server_errors, [])
 
     def request(self, path, body=None, auth=True, csrf=True):
         headers = {'Authorization': self.auth} if auth else {}
@@ -169,8 +183,8 @@ class HttpTest(Fixture):
 
 
 class SettingsTest(unittest.TestCase):
-    def test_defaults_preserve_existing_login_and_root_path(self):
-        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456'})
+    def test_explicit_root_preserves_existing_login(self):
+        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456', 'GUI_PATH': '/'})
         self.assertEqual((settings.username, settings.path, settings.port), ('admin', '', 18100))
 
     def test_custom_username_password_and_nested_path(self):

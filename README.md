@@ -12,7 +12,7 @@ SingDock 将 [Sing-Box-Plus](https://github.com/Alvin9999-newpac/Sing-Box-Plus) 
 | GUI 管理 | 查看节点、协议、出口、TCP/UDP 传输和当前端口；支持桌面与手机访问 |
 | 自定义端口 | 单节点编辑、连续端口批量分配、指定端口列表批量分配 |
 | 预览与恢复 | 应用前展示新旧端口，检查重复/占用及配置有效性；重启失败恢复旧配置并尝试恢复服务 |
-| 自定义登录 | 用户名、密码、管理端口和访问路径均可配置，例如 `/private/control/` |
+| 随机管理入口 | 首次启动自动生成并保存随机访问路径，在日志中显示地址；也可自定义用户名、密码、端口和路径 |
 | 分享链接 | 按需查看、复制客户端链接；修改端口后获取更新后的链接 |
 | 持久化 | 重建镜像、重启容器保留节点端口、证书和凭据 |
 | 可选 WARP | 开启后增加 10 个 WARP 出口节点；当前为实验性功能 |
@@ -56,13 +56,14 @@ GUI_BIND=127.0.0.1
 GUI_PORT=18100
 GUI_USERNAME=你的管理用户名
 GUI_PASSWORD=替换为至少16字符的独立强密码
-GUI_PATH=/private/control
+GUI_PATH=auto
 ```
 
 ```bash
 chmod 600 .env
 docker compose up -d --build
 docker compose exec singdock singdock ports
+docker compose logs singdock | grep "SingDock GUI:"
 ```
 
 按 `ports` 输出在 VPS 安全组和宿主防火墙放行 TCP/UDP。节点数据保存在 `data/sing-box`；容器不会替你修改宿主防火墙或占用网站的 443 端口。
@@ -75,25 +76,33 @@ docker compose exec singdock singdock ports
 ssh -L 18100:127.0.0.1:18100 root@你的VPS地址
 ```
 
-在本机打开 **`http://127.0.0.1:18100/private/control/`**，使用 `.env` 中的用户名和密码登录。
+首次启动完成后，日志会显示访问地址，例如：
 
-也可让宿主 Nginx 使用 **HTTPS** 反代 `http://127.0.0.1:18100`，保留完整路径，不剥离 `/private/control` 前缀。Basic 登录需要 SSH 隧道或 HTTPS 保护传输中的密码与分享链接。
+```text
+SingDock GUI: http://127.0.0.1:18100/panel-0123456789abcdef0123456789abcdef/
+```
+
+在本机打开日志中的实际地址，使用 `.env` 中的用户名和密码登录。路径使用安全随机数生成，每个部署独立；镜像构建时不生成路径。只有启用 GUI 才生成和打印，日志不包含密码。
+
+也可让宿主 Nginx 使用 **HTTPS** 反代 `http://127.0.0.1:18100`，保留完整路径，不剥离日志中的随机路径前缀。Basic 登录需要 SSH 隧道或 HTTPS 保护传输中的密码与分享链接。
 
 ## GUI 配置
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `ENABLE_GUI` | `false` | 是否启动 GUI |
-| `GUI_BIND` | `127.0.0.1` | 监听地址；默认不向公网直接开放 |
+| `GUI_BIND` | `127.0.0.1` | IPv4/IPv6 监听地址；默认不向公网直接开放 |
 | `GUI_PORT` | `18100` | 管理端口，1024–65535；不可使用 WARP 保留的 40000 |
 | `GUI_USERNAME` | `admin` | 1–64 个字符，可使用中文；不可含冒号、控制字符或首尾空白 |
 | `GUI_PASSWORD` | 无 | 必须设置；16–256 个字符，不可含控制字符，可含冒号 |
-| `GUI_PATH` | `/` | 访问路径；例如 `/panel`、`/private/control`，支持字母、数字、`_`、`-` 和多级路径 |
+| `GUI_PATH` | `auto` | 留空或设为 `auto` 自动生成；也可指定 `/private/control`、`/` 等路径 |
 | `PUBLIC_HOST` | 自动检测 | VPS 公网 IP 或域名，建议显式填写以确保分享链接正确 |
 
 路径末尾 `/` 可省略，访问时会自动补齐。设置自定义路径后，原来的 `/`、`/api/*` 和静态资源入口不再提供 GUI。路径不替代登录保护。
 
-修改以上配置后执行 `docker compose up -d --build`。旧部署未设置新字段时仍使用 `admin` 和 `/`；已有节点凭据会保留。
+随机路径保存在 `data/sing-box/gui-path`，权限为 `600`。重启、重建镜像和重新创建容器均沿用此路径，备份数据目录时一并备份。显式指定 `GUI_PATH` 会覆盖本次使用的路径；恢复 `auto` 后继续使用原随机路径。旧部署明确配置 `GUI_PATH=/` 时仍使用根路径；未设置或留空会改用随机入口。
+
+修改配置后执行 `docker compose up -d --build`，已有节点凭据会保留。如需重新生成随机入口，先停止容器，删除 `data/sing-box/gui-path`，保持 `GUI_PATH=auto` 后启动。若路径文件损坏或是符号链接，启动会拒绝使用，请检查或删除该文件再重建；不会静默退回根路径。
 
 ### 修改节点端口
 
@@ -157,8 +166,8 @@ AMD64/ARM64 的 WARP 镜像构建及二进制检查已通过；注册、连接�
 <details>
 <summary>验证、故障排查与实现边界</summary>
 
-- [Container CI](https://github.com/While-Shark/SingDock/actions/workflows/container.yml)：AMD64/ARM64、bridge/host，检查启动、凭据持久化、GUI 登录、预览、真实服务重启和 10 种节点的客户端 → 代理 → HTTP 链路。Reality 使用隔离的本地 TLS 1.3/H2 目标。
-- [GUI Browser CI](https://github.com/While-Shark/SingDock/actions/workflows/gui-browser.yml)：1280px 桌面和 390px 手机，覆盖批量配置、取消/应用预览、过期配置错误、链接复制和关闭清理；增加默认路径/账号与自定义路径/账号两组测试。合成节点截图保存在 `gui-browser-screenshots-*` 产物中，保留 7 天。
+- [Container CI](https://github.com/While-Shark/SingDock/actions/workflows/container.yml)：AMD64/ARM64、bridge/host，检查启动、凭据/随机路径持久化、启动日志、GUI 登录、预览、真实服务重启和 10 种节点的客户端 → 代理 → HTTP 链路。Reality 使用隔离的本地 TLS 1.3/H2 目标。
+- [GUI Browser CI](https://github.com/While-Shark/SingDock/actions/workflows/gui-browser.yml)：1280px 桌面和 390px 手机，覆盖批量配置、取消/应用预览、过期配置错误、链接复制和关闭清理；覆盖显式根路径/默认账号与自定义路径/账号两组测试。合成节点截图保存在 `gui-browser-screenshots-*` 产物中，保留 7 天。
 - 持久化节点设置通过白名单数据解析，不执行 `source`；可写数据目录不进入执行 PATH。GUI 对登录失败限流，通过 Waitress 限制线程、连接、请求头和请求体，拒绝冲突请求长度。反代下限流按实际连接地址计数，不信任可伪造的转发头。
 - GUI 列表不返回密码、私钥或 UUID；分享链接含客户端凭据，按需读取。界面不需要 Docker socket，包含登录校验、跨站写入拦截、文件锁、过期预览检测和静态文件白名单。
 - 配置及回滚备份使用 600 权限。端口/配置分别原子替换；强制终止容器可能需要用 `.bak` 恢复。探测与重启间的端口抢占会由失败回滚处理。
