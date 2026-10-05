@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Run after docker build -t singdock:test .
+# Run after docker build -t singdock:test .; optional second argument: bridge|host.
 set -Eeuo pipefail
 image="${1:-singdock:test}"
+mode="${2:-bridge}"
+[[ "$mode" == bridge || "$mode" == host ]] || { echo "Network mode must be bridge or host" >&2; exit 2; }
 suffix="$$"
 net="singdock-test-$suffix"
 server="singdock-server-$suffix"
@@ -11,14 +13,18 @@ cleanup() {
   docker rm -f "$server" "$http" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
+  rm -f /tmp/singdock-links-"$suffix"
 }
 trap cleanup EXIT
+trap 'echo "Smoke test failed at line $LINENO ($mode)" >&2; docker logs --tail 80 "$server" >&2 || true' ERR
 docker network create "$net" >/dev/null
 docker volume create "$volume" >/dev/null
 docker run -d --name "$http" --network "$net" busybox:1.37 sh -c \
   'mkdir -p /www; echo singdock-smoke-ok > /www/index.html; exec httpd -f -p 8080 -h /www' >/dev/null
 start() {
-  docker run -d --name "$server" --network "$net" \
+  local server_network="$net"
+  [[ "$mode" != host ]] || server_network=host
+  docker run -d --name "$server" --network "$server_network" \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
     -v "$volume:/opt/sing-box" "$image" >/dev/null
   for _ in {1..60}; do
@@ -37,6 +43,17 @@ docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort 
 identity=$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')
 docker exec "$server" singdock init
 test "$identity" = "$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')"
+# A rejected candidate must not replace the valid configuration.
+config_before=$(docker exec "$server" sha256sum /opt/sing-box/config.json)
+docker exec "$server" sh -c 'cp /opt/sing-box/env.conf /tmp/env.conf.before-test;
+  sed -i "s/^REALITY_SERVER_PORT=.*/REALITY_SERVER_PORT=65536/" /opt/sing-box/env.conf'
+if docker exec "$server" singdock init; then
+  echo "Invalid port unexpectedly passed configuration validation" >&2
+  exit 1
+fi
+test "$config_before" = "$(docker exec "$server" sha256sum /opt/sing-box/config.json)"
+docker exec "$server" sh -c 'mv /tmp/env.conf.before-test /opt/sing-box/env.conf'
+docker exec "$server" singdock check
 docker stop -t 10 "$server" >/dev/null
 test "$(docker inspect -f '{{.State.ExitCode}}' "$server")" != 137
 docker rm "$server" >/dev/null
@@ -62,4 +79,4 @@ docker exec "$server" curl --retry 10 --retry-connrefused --retry-delay 1 \
 docker exec "$server" singdock rotate-ports
 docker exec "$server" singdock check
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
-echo "PASS: config, identity persistence, shutdown, links, Shadowsocks TCP, port rotation"
+echo "PASS ($mode): config, rejected candidate, identity persistence, shutdown, links, Shadowsocks TCP, port rotation"

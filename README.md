@@ -2,7 +2,7 @@
 
 把 [Sing-Box-Plus](https://github.com/Alvin9999-newpac/Sing-Box-Plus) 放进 Debian 容器，方便在 CentOS 7 等宿主机部署。保留原脚本的配置、证书、节点链接和中文菜单，只适配容器运行所需的部分。
 
-**当前为首版测试实现。** 目标是解决用户空间依赖，不保证旧宿主内核能运行所有协议或官方 WARP。CI 分别检查镜像构建、服务启动和 Shadowsocks TCP 实际握手；其余协议和 CentOS 7/WARP 需实测后确认。
+**当前为首版测试实现。** 普通镜像与可选 WARP 镜像已通过 AMD64 构建；普通容器已通过启动、配置校验、身份持久化、端口更换及真实 Shadowsocks TCP 握手测试。目标是解决用户空间依赖，不保证旧宿主内核能运行所有协议或官方 WARP；其余协议握手、ARM64 和 CentOS 7/WARP 需实测后确认。
 
 ## Docker Compose
 
@@ -97,4 +97,12 @@ docker compose up -d --build
 
 详见 [UPSTREAM.md](UPSTREAM.md)。上游源码保持原结构，只有非终端保护与可导入入口两个适配；覆盖函数集中在 `docker/manage.sh`。不用每次启动从远程下载执行脚本。
 
-本地验证：`docker build -t singdock:test . && bash tests/smoke.sh`。CI 使用隔离网络，测试配置、密钥/证书/端口保留、停止、分享链接、端口更换，以及真实 Shadowsocks TCP → HTTP 链路；不据此声称全部协议或 WARP 已可用。
+本地验证：
+
+```bash
+docker build -t singdock:test .
+bash tests/smoke.sh singdock:test bridge
+bash tests/smoke.sh singdock:test host
+```
+
+CI 分别覆盖隔离 bridge 网络与部署使用的 host 网络，测试配置、错误配置不覆盖旧文件、密钥/证书/端口保留、停止、分享链接、端口更换，以及真实 Shadowsocks TCP → HTTP 链路。host 测试会临时监听测试机器端口，应在测试机器运行；脚本退出时清理自己的容器和测试数据。不据此声称全部协议或 WARP 已可用。
