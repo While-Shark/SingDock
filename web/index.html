@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SingDock · 节点管理</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head><body>
+<header><a class="brand" href="/">◈ SingDock</a><span>轻量节点管理</span><button id="refresh">刷新</button></header>
+<main><section class="intro"><div><p class="eyebrow">CONTROL PANEL</p><h1>你的节点，一目了然。</h1><p>自定义端口，预览变更，安全应用。</p></div><div class="count"><strong id="count">—</strong><span>运行配置中的节点</span></div></section>
+<p id="notice" role="status" aria-live="polite">正在读取配置…</p>
+<section class="card"><div class="toolbar"><div><h2>端口配置</h2><p>选择节点后批量分配，也可以逐个编辑。</p></div><button id="links">查看分享链接</button></div>
+<div class="batch"><label>分配方式<select id="mode"><option value="continuous">连续端口</option><option value="list">自定义端口列表</option></select></label><label class="grow"><span id="port-label">起始端口</span><input id="batch-ports" value="20000" placeholder="20000" autocomplete="off"></label><button id="assign">填入所选节点</button></div>
+<div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="all" aria-label="选择全部节点"></th><th>节点 / 协议</th><th>出口</th><th>传输</th><th>当前端口</th><th>新端口</th></tr></thead><tbody id="nodes"></tbody></table></div>
+<div class="footer"><span>应用会短暂重启节点服务，请在宿主防火墙放行新端口。</span><button class="primary" id="preview">预览变更</button></div></section>
+</main><dialog id="confirmation"><h2>确认端口变更</h2><p>凭据保持不变。应用后请重新导入分享链接。</p><div id="changes"></div><div class="actions"><button id="cancel">取消</button><button id="apply" class="primary">应用并重启</button></div></dialog>
+<dialog id="share"><h2>分享链接</h2><p>包含连接凭据，请妥善保管。</p><textarea id="share-text" readonly aria-label="节点分享链接"></textarea><div class="actions"><button id="close-share">关闭</button><button id="copy">复制</button></div></dialog>
+</body></html>

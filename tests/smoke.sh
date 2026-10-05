@@ -26,6 +26,7 @@ start() {
   [[ "$mode" != host ]] || server_network=host
   docker run -d --name "$server" --network "$server_network" \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
+    -e ENABLE_GUI=true -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \
     -e REALITY_SERVER=localhost -e REALITY_SERVERS=localhost \
     -v "$volume:/opt/sing-box" "$image" >/dev/null
   for _ in {1..60}; do
@@ -106,6 +107,8 @@ for protocol in ss ss2022 vmess-ws hy2 hy2-obfs tuic-v5 anytls vless-reality vle
   fi
   echo "PASS: $protocol handshake and TCP target"
 done
+docker cp "$(dirname "$0")/gui_smoke.py" "$server:/tmp/gui_smoke.py"
+docker exec "$server" python3 /tmp/gui_smoke.py
 docker exec "$server" singdock rotate-ports
 docker exec "$server" singdock check
 docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'

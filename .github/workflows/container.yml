@@ -27,7 +27,10 @@ jobs:
             bash -n "$script"
           done
       - name: Test helper syntax
-        run: python3 -m py_compile tests/client_config.py
+        run: |
+          python3 -m py_compile tests/client_config.py web/*.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          node --check web/app.js
       - name: Compose configuration
         run: docker compose config --quiet
       - name: Build

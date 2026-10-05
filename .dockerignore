@@ -3,3 +3,5 @@
 data
 tests
 *.log
+__pycache__
+*.pyc
