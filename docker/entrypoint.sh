@@ -4,11 +4,11 @@ umask 077
 if [[ "${1:-serve}" != serve ]]; then exec singdock "$@"; fi
 [[ "${ENABLE_WARP:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_WARP must be true or false"; exit 1; }
 [[ "${ENABLE_GUI:-false}" =~ ^(true|false)$ ]] || { echo "ENABLE_GUI must be true or false"; exit 1; }
+mkdir -p /opt/sing-box /run/singdock /var/lib/cloudflare-warp
+chmod 700 /opt/sing-box /run/singdock /var/lib/cloudflare-warp
 if [[ "${ENABLE_GUI:-false}" == true ]]; then
   python3 /opt/singdock/web/settings.py
 fi
-mkdir -p /opt/sing-box /run/singdock /var/lib/cloudflare-warp
-chmod 700 /opt/sing-box /run/singdock /var/lib/cloudflare-warp
 supervisor_pid=''
 cleanup() {
   if [[ -n "$supervisor_pid" ]]; then

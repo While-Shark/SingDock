@@ -169,8 +169,8 @@ class HttpTest(Fixture):
 
 
 class SettingsTest(unittest.TestCase):
-    def test_defaults_preserve_existing_login_and_root_path(self):
-        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456'})
+    def test_explicit_root_preserves_existing_login(self):
+        settings = Settings.from_env({'GUI_PASSWORD': 'test-password-123456', 'GUI_PATH': '/'})
         self.assertEqual((settings.username, settings.path, settings.port), ('admin', '', 18100))
 
     def test_custom_username_password_and_nested_path(self):

@@ -2,10 +2,14 @@
 import base64
 import json
 import os
+import sys
+sys.path.insert(0, '/opt/singdock/web')
+from settings import Settings
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-url = 'http://127.0.0.1:' + os.environ.get('GUI_PORT', '18100') + os.environ.get('GUI_PATH', '/').rstrip('/')
+settings = Settings.from_env()
+url = f'http://127.0.0.1:{settings.port}{settings.path}'
 auth = 'Basic ' + base64.b64encode((os.environ.get('GUI_USERNAME', 'admin') + ':' + os.environ['GUI_PASSWORD']).encode()).decode()
 
 

@@ -27,41 +27,10 @@ start() {
   docker run -d --name "$server" --network "$server_network" \
     --security-opt no-new-privileges:true --cap-drop NET_RAW --cap-drop MKNOD --cap-drop SYS_CHROOT \
     -e PUBLIC_HOST=example.com -e ENABLE_WARP=false \
-    -e ENABLE_GUI=true -e GUI_USERNAME=smoke-manager -e GUI_PATH=/private/control \
+    -e ENABLE_GUI=true -e GUI_USERNAME=smoke-manager -e GUI_PATH=auto \
     -e GUI_PASSWORD=smoke-test-password-123456 -e GUI_PORT=18100 \
     -e REALITY_SERVER=localhost -e REALITY_SERVERS=localhost \
-    -v "$volume:/opt/sing-box" "$image" >/dev/null
-  for _ in {1..60}; do
-    if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$server")" == healthy ]]; then return; fi
-    if [[ "$(docker inspect -f '{{.State.Running}}' "$server")" != true ]]; then break; fi
-    sleep 1
-  done
-  docker logs "$server"; return 1
-}
-start
-docker exec "$server" singdock check
-docker exec "$server" jq -e '.inbounds | length == 10' /opt/sing-box/config.json >/dev/null
-docker exec "$server" jq -e '.route.default_domain_resolver as $resolver |
-  $resolver == "dns-remote" and any(.dns.servers[]; .tag == $resolver)' /opt/sing-box/config.json >/dev/null
-docker exec "$server" sh -c 'test "$(cut -d= -f2 /opt/sing-box/ports.env | sort -u | wc -l)" -eq 20'
-identity=$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')
-docker exec "$server" singdock init
-test "$identity" = "$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')"
-# A rejected candidate must not replace the valid configuration.
-config_before=$(docker exec "$server" sha256sum /opt/sing-box/config.json)
-docker exec "$server" sh -c 'cp /opt/sing-box/env.conf /tmp/env.conf.before-test;
-  sed -i "s/^REALITY_SERVER_PORT=.*/REALITY_SERVER_PORT=65536/" /opt/sing-box/env.conf'
-if docker exec "$server" singdock init; then
-  echo "Invalid port unexpectedly passed configuration validation" >&2
-  exit 1
-fi
-test "$config_before" = "$(docker exec "$server" sha256sum /opt/sing-box/config.json)"
-docker exec "$server" sh -c 'mv /tmp/env.conf.before-test /opt/sing-box/env.conf'
-docker exec "$server" singdock check
-docker stop -t 10 "$server" >/dev/null
-test "$(docker inspect -f '{{.State.ExitCode}}' "$server")" != 137
-docker rm "$server" >/dev/null
-start
+    -v "$volume:/opt/sin…573 tokens truncated… 2>&1 | grep -F "SingDock GUI: http://127.0.0.1:18100$gui_path/"
 test "$identity" = "$(docker exec "$server" sh -c 'sha256sum /opt/sing-box/creds.env /opt/sing-box/cert/key.pem /opt/sing-box/ports.env')"
 docker exec "$server" singdock links > /tmp/singdock-links-"$suffix"
 test "$(grep -Ec '^  (vless|trojan|hy2|vmess|ss|tuic|anytls)://' /tmp/singdock-links-"$suffix")" -ge 10

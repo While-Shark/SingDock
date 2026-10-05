@@ -138,7 +138,11 @@ def main():
         settings = Settings.from_env()
     except ValueError as error:
         raise SystemExit(str(error))
-    make_server(create_app(settings), settings.bind, settings.port).run()
+    server = make_server(create_app(settings), settings.bind, settings.port)
+    host = '[' + settings.bind + ']' if ':' in settings.bind else settings.bind
+    print(f'SingDock GUI: http://{host}:{settings.port}{settings.path}/', flush=True)
+    print('GUI login: use GUI_USERNAME and GUI_PASSWORD from your environment.', flush=True)
+    server.run()
 
 
 if __name__ == '__main__':
